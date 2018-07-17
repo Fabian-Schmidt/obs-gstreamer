@@ -18,7 +18,7 @@
  * along with obs-gstreamer-source. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <obs/obs-module.h>
+#include <libobs/obs-module.h>
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/audio/audio.h>
@@ -86,7 +86,7 @@ static GstFlowReturn video_new_sample(GstAppSink* appsink, gpointer user_data)
 	gst_video_info_from_caps(&video_info, caps);
 	gst_buffer_map(buffer, &info, GST_MAP_READ);
 
-	struct obs_source_frame frame = {};
+	struct obs_source_frame frame = {0};
 
 	frame.timestamp = obs_data_get_bool(data->settings, "use_timestamps") ? GST_BUFFER_PTS(buffer) : data->frame_count++;
 
@@ -175,7 +175,7 @@ static GstFlowReturn audio_new_sample(GstAppSink* appsink, gpointer user_data)
 	gst_audio_info_from_caps(&audio_info, caps);
 	gst_buffer_map(buffer, &info, GST_MAP_READ);
 
-	struct obs_source_audio audio = {};
+	struct obs_source_audio audio = {0};
 
 	audio.timestamp = obs_data_get_bool(data->settings, "use_timestamps") ? GST_BUFFER_PTS(buffer) : 0;
 
@@ -248,7 +248,7 @@ static void start(data_t* data)
 {
 	GError* err = NULL;
 
-	g_autofree gchar* pipeline = g_strdup_printf(
+	gchar* pipeline = g_strdup_printf(
 		"videoconvert name=video ! video/x-raw, format={I420,NV12,BGRA,RGBA,YUY2,YVYU,UYVY} ! appsink name=video_appsink "
 		"audioconvert name=audio ! audioresample ! audio/x-raw, format={U8,S16LE,S32LE,F32LE}, channels={1,2,3,4,5,6,8} ! appsink name=audio_appsink "
 		"%s",
@@ -262,6 +262,7 @@ static void start(data_t* data)
 
 		obs_source_output_video(data->source, NULL);
 
+		g_free(pipeline);
 		return;
 	}
 
@@ -316,6 +317,8 @@ static void start(data_t* data)
 	gst_object_unref(bus);
 
 	gst_element_set_state(data->pipe, GST_STATE_PLAYING);
+
+	g_free(pipeline);
 }
 
 static void* create(obs_data_t* settings, obs_source_t* source)
