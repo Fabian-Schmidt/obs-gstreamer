@@ -21,6 +21,12 @@
   <ItemGroup>
     <ClCompile Include="gstreamer.c" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="obs-gstreamer.rc" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{63AEFB51-5FB8-409B-BDF3-893A23D28BF3}</ProjectGuid>
