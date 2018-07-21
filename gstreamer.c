@@ -34,14 +34,13 @@ typedef struct {
 	guint timeout_id;
 } data_t;
 
-static gboolean start_pipe(gpointer user_data)
-{
-	data_t* data = user_data;
+static void start(data_t* data);
+static void stop(data_t* data);
 
-	data->timeout_id = 0;
-	gst_element_set_state(data->pipe, GST_STATE_PLAYING);
-
-	return FALSE;
+void g_main_loop_thread(void* data) {
+	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+	g_main_loop_run(loop);
+	return NULL;
 }
 
 static gboolean bus_callback(GstBus* bus, GstMessage* message, gpointer user_data)
@@ -50,8 +49,13 @@ static gboolean bus_callback(GstBus* bus, GstMessage* message, gpointer user_dat
 
 	switch (GST_MESSAGE_TYPE(message)) {
 		case GST_MESSAGE_EOS:
-			if (obs_data_get_bool(data->settings, "restart_on_eos"))
-				gst_element_seek_simple(data->pipe, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0);
+			if (obs_data_get_bool(data->settings, "restart_on_eos")) {
+				if (gst_element_seek_simple(data->pipe, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0) == FALSE) {
+					// Cannot seek pipeline. Maybe because it is a stream. Stop and restart.
+					stop(data);
+					data->timeout_id = g_timeout_add_seconds(5, start, data);
+				}
+			}
 			else
 				obs_source_output_video(data->source, NULL);
 			break;
@@ -65,7 +69,8 @@ static gboolean bus_callback(GstBus* bus, GstMessage* message, gpointer user_dat
 			gst_element_set_state(data->pipe, GST_STATE_NULL);
 			obs_source_output_video(data->source, NULL);
 			if (obs_data_get_bool(data->settings, "restart_on_error") && data->timeout_id == 0)
-				data->timeout_id = g_timeout_add_seconds(5, start_pipe, data);
+				stop(data);
+				data->timeout_id = g_timeout_add_seconds(5, start, data);
 			break;
 		default:
 			break;
@@ -246,6 +251,8 @@ static const char* get_name(void* type_data)
 
 static void start(data_t* data)
 {
+	data->timeout_id = 0;
+
 	GError* err = NULL;
 
 	gchar* pipeline = g_strdup_printf(
@@ -428,6 +435,7 @@ bool obs_module_load(void)
 	obs_register_source(&info);
 
 	gst_init(NULL, NULL);
+	GThread* thread = g_thread_new(NULL, (GThreadFunc)g_main_loop_thread, NULL);
 
 	return true;
 }
