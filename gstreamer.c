@@ -1,22 +1,22 @@
 /*
- * obs-gstreamer-source. OBS Studio source plugin.
- * Copyright (C) 2018 Florian Zwoch <fzwoch@gmail.com>
- *
- * This file is part of obs-gstreamer-source.
- *
- * obs-gstreamer-source is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * obs-gstreamer-source is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with obs-gstreamer-source. If not, see <http://www.gnu.org/licenses/>.
- */
+* obs-gstreamer-source. OBS Studio source plugin.
+* Copyright (C) 2018 Florian Zwoch <fzwoch@gmail.com>
+*
+* This file is part of obs-gstreamer-source.
+*
+* obs-gstreamer-source is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 2 of the License, or
+* (at your option) any later version.
+*
+* obs-gstreamer-source is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with obs-gstreamer-source. If not, see <http://www.gnu.org/licenses/>.
+*/
 
 #include <libobs/obs-module.h>
 #include <gst/gst.h>
@@ -32,48 +32,44 @@ typedef struct {
 	obs_data_t* settings;
 	gint64 frame_count;
 	guint timeout_id;
+	guint bus_watch_id;
 } data_t;
 
 static void start(data_t* data);
 static void stop(data_t* data);
-
-void g_main_loop_thread(void* data) {
-	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
-	g_main_loop_run(loop);
-	return NULL;
-}
 
 static gboolean bus_callback(GstBus* bus, GstMessage* message, gpointer user_data)
 {
 	data_t* data = user_data;
 
 	switch (GST_MESSAGE_TYPE(message)) {
-		case GST_MESSAGE_EOS:
-			if (obs_data_get_bool(data->settings, "restart_on_eos")) {
-				if (gst_element_seek_simple(data->pipe, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0) == FALSE) {
-					// Cannot seek pipeline. Maybe because it is a stream. Stop and restart.
-					stop(data);
-					data->timeout_id = g_timeout_add_seconds(5, start, data);
-				}
-			}
-			else
-				obs_source_output_video(data->source, NULL);
-			break;
-		case GST_MESSAGE_ERROR:
-			{
-				GError* err;
-				gst_message_parse_error(message, &err, NULL);
-				blog(LOG_ERROR, "%s", err->message);
-				g_error_free(err);
-			}
-			gst_element_set_state(data->pipe, GST_STATE_NULL);
-			obs_source_output_video(data->source, NULL);
-			if (obs_data_get_bool(data->settings, "restart_on_error") && data->timeout_id == 0)
+	case GST_MESSAGE_EOS:
+		if (obs_data_get_bool(data->settings, "restart_on_eos")) {
+			if (gst_element_seek_simple(data->pipe, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0) == FALSE) {
+				// Cannot seek pipeline. Maybe because it is a stream. Stop and restart.
 				stop(data);
 				data->timeout_id = g_timeout_add_seconds(5, start, data);
-			break;
-		default:
-			break;
+			}
+		}
+		else
+			obs_source_output_video(data->source, NULL);
+		break;
+	case GST_MESSAGE_ERROR:
+	{
+		GError* err;
+		gst_message_parse_error(message, &err, NULL);
+		blog(LOG_ERROR, "%s", err->message);
+		g_error_free(err);
+	}
+	gst_element_set_state(data->pipe, GST_STATE_NULL);
+	obs_source_output_video(data->source, NULL);
+	if (obs_data_get_bool(data->settings, "restart_on_error") && data->timeout_id == 0) {
+		stop(data);
+		data->timeout_id = g_timeout_add_seconds(5, start, data);
+	}
+	break;
+	default:
+		break;
 	}
 
 	return TRUE;
@@ -91,7 +87,7 @@ static GstFlowReturn video_new_sample(GstAppSink* appsink, gpointer user_data)
 	gst_video_info_from_caps(&video_info, caps);
 	gst_buffer_map(buffer, &info, GST_MAP_READ);
 
-	struct obs_source_frame frame = {0};
+	struct obs_source_frame frame = { 0 };
 
 	frame.timestamp = obs_data_get_bool(data->settings, "use_timestamps") ? GST_BUFFER_PTS(buffer) : data->frame_count++;
 
@@ -106,58 +102,58 @@ static GstFlowReturn video_new_sample(GstAppSink* appsink, gpointer user_data)
 
 	enum video_range_type range = VIDEO_RANGE_DEFAULT;
 	switch (video_info.colorimetry.range) {
-		case GST_VIDEO_COLOR_RANGE_0_255:
-			range = VIDEO_RANGE_FULL;
-			frame.full_range = 1;
-			break;
-		case GST_VIDEO_COLOR_RANGE_16_235:
-			range = VIDEO_RANGE_PARTIAL;
-			break;
-		default:
-			break;
+	case GST_VIDEO_COLOR_RANGE_0_255:
+		range = VIDEO_RANGE_FULL;
+		frame.full_range = 1;
+		break;
+	case GST_VIDEO_COLOR_RANGE_16_235:
+		range = VIDEO_RANGE_PARTIAL;
+		break;
+	default:
+		break;
 	}
 
 	enum video_colorspace cs = VIDEO_CS_DEFAULT;
 	switch (video_info.colorimetry.matrix) {
-		case GST_VIDEO_COLOR_MATRIX_BT709:
-			cs = VIDEO_CS_709;
-			break;
-		case GST_VIDEO_COLOR_MATRIX_BT601:
-			cs = VIDEO_CS_601;
-			break;
-		default:
-			break;
+	case GST_VIDEO_COLOR_MATRIX_BT709:
+		cs = VIDEO_CS_709;
+		break;
+	case GST_VIDEO_COLOR_MATRIX_BT601:
+		cs = VIDEO_CS_601;
+		break;
+	default:
+		break;
 	}
 
 	video_format_get_parameters(cs, range, frame.color_matrix, frame.color_range_min, frame.color_range_max);
 
 	switch (video_info.finfo->format)
 	{
-		case GST_VIDEO_FORMAT_I420:
-			frame.format = VIDEO_FORMAT_I420;
-			break;
-		case GST_VIDEO_FORMAT_NV12:
-			frame.format = VIDEO_FORMAT_NV12;
-			break;
-		case GST_VIDEO_FORMAT_BGRA:
-			frame.format = VIDEO_FORMAT_BGRX;
-			break;
-		case GST_VIDEO_FORMAT_RGBA:
-			frame.format = VIDEO_FORMAT_RGBA;
-			break;
-		case GST_VIDEO_FORMAT_UYVY:
-			frame.format = VIDEO_FORMAT_UYVY;
-			break;
-		case GST_VIDEO_FORMAT_YUY2:
-			frame.format = VIDEO_FORMAT_YUY2;
-			break;
-		case GST_VIDEO_FORMAT_YVYU:
-			frame.format = VIDEO_FORMAT_YVYU;
-			break;
-		default:
-			frame.format = VIDEO_FORMAT_NONE;
-			blog(LOG_ERROR, "Unknown video format: %s", video_info.finfo->name);
-			break;
+	case GST_VIDEO_FORMAT_I420:
+		frame.format = VIDEO_FORMAT_I420;
+		break;
+	case GST_VIDEO_FORMAT_NV12:
+		frame.format = VIDEO_FORMAT_NV12;
+		break;
+	case GST_VIDEO_FORMAT_BGRA:
+		frame.format = VIDEO_FORMAT_BGRX;
+		break;
+	case GST_VIDEO_FORMAT_RGBA:
+		frame.format = VIDEO_FORMAT_RGBA;
+		break;
+	case GST_VIDEO_FORMAT_UYVY:
+		frame.format = VIDEO_FORMAT_UYVY;
+		break;
+	case GST_VIDEO_FORMAT_YUY2:
+		frame.format = VIDEO_FORMAT_YUY2;
+		break;
+	case GST_VIDEO_FORMAT_YVYU:
+		frame.format = VIDEO_FORMAT_YVYU;
+		break;
+	default:
+		frame.format = VIDEO_FORMAT_NONE;
+		blog(LOG_ERROR, "Unknown video format: %s", video_info.finfo->name);
+		break;
 	}
 
 	obs_source_output_video(data->source, &frame);
@@ -180,7 +176,7 @@ static GstFlowReturn audio_new_sample(GstAppSink* appsink, gpointer user_data)
 	gst_audio_info_from_caps(&audio_info, caps);
 	gst_buffer_map(buffer, &info, GST_MAP_READ);
 
-	struct obs_source_audio audio = {0};
+	struct obs_source_audio audio = { 0 };
 
 	audio.timestamp = obs_data_get_bool(data->settings, "use_timestamps") ? GST_BUFFER_PTS(buffer) : 0;
 
@@ -189,51 +185,51 @@ static GstFlowReturn audio_new_sample(GstAppSink* appsink, gpointer user_data)
 	audio.data[0] = info.data;
 
 	switch (audio_info.channels) {
-		case 1:
-			audio.speakers = SPEAKERS_MONO;
-			break;
-		case 2:
-			audio.speakers = SPEAKERS_STEREO;
-			break;
-		case 3:
-			audio.speakers = SPEAKERS_2POINT1;
-			break;
-		case 4:
-			audio.speakers = SPEAKERS_4POINT0;
-			break;
-		case 5:
-			audio.speakers = SPEAKERS_4POINT1;
-			break;
-		case 6:
-			audio.speakers = SPEAKERS_5POINT1;
-			break;
-		case 8:
-			audio.speakers = SPEAKERS_7POINT1;
-			break;
-		default:
-			audio.speakers = SPEAKERS_UNKNOWN;
-			blog(LOG_ERROR, "Unsupported channel count: %d", audio_info.channels);
-			break;
+	case 1:
+		audio.speakers = SPEAKERS_MONO;
+		break;
+	case 2:
+		audio.speakers = SPEAKERS_STEREO;
+		break;
+	case 3:
+		audio.speakers = SPEAKERS_2POINT1;
+		break;
+	case 4:
+		audio.speakers = SPEAKERS_4POINT0;
+		break;
+	case 5:
+		audio.speakers = SPEAKERS_4POINT1;
+		break;
+	case 6:
+		audio.speakers = SPEAKERS_5POINT1;
+		break;
+	case 8:
+		audio.speakers = SPEAKERS_7POINT1;
+		break;
+	default:
+		audio.speakers = SPEAKERS_UNKNOWN;
+		blog(LOG_ERROR, "Unsupported channel count: %d", audio_info.channels);
+		break;
 	}
 
 	switch (audio_info.finfo->format)
 	{
-		case GST_AUDIO_FORMAT_U8:
-			audio.format = AUDIO_FORMAT_U8BIT;
-			break;
-		case GST_AUDIO_FORMAT_S16LE:
-			audio.format = AUDIO_FORMAT_16BIT;
-			break;
-		case GST_AUDIO_FORMAT_S32LE:
-			audio.format = AUDIO_FORMAT_32BIT;
-			break;
-		case GST_AUDIO_FORMAT_F32LE:
-			audio.format = AUDIO_FORMAT_FLOAT;
-			break;
-		default:
-			audio.format = AUDIO_FORMAT_UNKNOWN;
-			blog(LOG_ERROR, "Unknown audio format: %s", audio_info.finfo->name);
-			break;
+	case GST_AUDIO_FORMAT_U8:
+		audio.format = AUDIO_FORMAT_U8BIT;
+		break;
+	case GST_AUDIO_FORMAT_S16LE:
+		audio.format = AUDIO_FORMAT_16BIT;
+		break;
+	case GST_AUDIO_FORMAT_S32LE:
+		audio.format = AUDIO_FORMAT_32BIT;
+		break;
+	case GST_AUDIO_FORMAT_F32LE:
+		audio.format = AUDIO_FORMAT_FLOAT;
+		break;
+	default:
+		audio.format = AUDIO_FORMAT_UNKNOWN;
+		blog(LOG_ERROR, "Unknown audio format: %s", audio_info.finfo->name);
+		break;
 	}
 
 	obs_source_output_audio(data->source, &audio);
@@ -251,6 +247,11 @@ static const char* get_name(void* type_data)
 
 static void start(data_t* data)
 {
+	if (data->pipe != NULL)
+	{
+		return;
+	}
+
 	data->timeout_id = 0;
 
 	GError* err = NULL;
@@ -262,14 +263,15 @@ static void start(data_t* data)
 		obs_data_get_string(data->settings, "pipeline"));
 
 	data->pipe = gst_parse_launch(pipeline, &err);
+	g_free(pipeline);
 	if (err != NULL)
 	{
 		blog(LOG_ERROR, "Cannot start GStreamer: %s", err->message);
 		g_error_free(err);
 
-		obs_source_output_video(data->source, NULL);
+		gst_object_unref(data->pipe);
 
-		g_free(pipeline);
+		obs_source_output_video(data->source, NULL);
 		return;
 	}
 
@@ -320,12 +322,10 @@ static void start(data_t* data)
 	data->frame_count = 0;
 
 	GstBus* bus = gst_element_get_bus(data->pipe);
-	gst_bus_add_watch(bus, bus_callback, data);
+	data->bus_watch_id = gst_bus_add_watch(bus, bus_callback, data);
 	gst_object_unref(bus);
 
 	gst_element_set_state(data->pipe, GST_STATE_PLAYING);
-
-	g_free(pipeline);
 }
 
 static void* create(obs_data_t* settings, obs_source_t* source)
@@ -346,14 +346,17 @@ static void stop(data_t* data)
 		data->timeout_id = 0;
 	}
 
-	if (data->pipe == NULL)
-	{
-		return;
+	if (data->bus_watch_id != 0) {
+		g_source_remove(data->bus_watch_id);
+		data->bus_watch_id = 0;
 	}
 
-	gst_element_set_state(data->pipe, GST_STATE_NULL);
-	gst_object_unref(data->pipe);
-	data->pipe = NULL;
+	if (data->pipe != NULL)
+	{
+		gst_element_set_state(data->pipe, GST_STATE_NULL);
+		gst_object_unref(data->pipe);
+		data->pipe = NULL;
+	}
 
 	obs_source_output_video(data->source, NULL);
 }
@@ -414,6 +417,15 @@ static void hide(void* data)
 		stop(data);
 }
 
+void g_main_loop_thread(void* data) {
+	GMainLoop* loop = g_main_loop_new(NULL, FALSE);
+	g_main_loop_run(loop);
+
+	g_main_loop_unref(loop);
+
+	return 0;
+}
+
 bool obs_module_load(void)
 {
 	struct obs_source_info info = {
@@ -435,6 +447,7 @@ bool obs_module_load(void)
 	obs_register_source(&info);
 
 	gst_init(NULL, NULL);
+
 	GThread* thread = g_thread_new(NULL, (GThreadFunc)g_main_loop_thread, NULL);
 
 	return true;
