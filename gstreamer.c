@@ -23,6 +23,7 @@
 #include <gst/video/video.h>
 #include <gst/audio/audio.h>
 #include <gst/app/app.h>
+#include <gst/net/gstnetclientclock.h>
 
 OBS_DECLARE_MODULE()
 
@@ -33,6 +34,7 @@ typedef struct {
 	gint64 frame_count;
 	guint timeout_id;
 	guint bus_watch_id;
+	GstClock* net_clock;
 } data_t;
 
 static void start(data_t* data);
@@ -254,6 +256,25 @@ static void start(data_t* data)
 
 	data->timeout_id = 0;
 
+	if (obs_data_get_bool(data->settings, "external_clock")) {
+		data->net_clock = gst_net_client_clock_new("netclock",
+			obs_data_get_string(data->settings, "external_clock_ip"),
+			obs_data_get_int(data->settings, "external_clock_port"),
+			0);
+		if (!gst_clock_wait_for_sync(data->net_clock, 3 * GST_SECOND)) {
+			blog(LOG_ERROR, "Cannot start GStreamer: Clock did not sync");
+
+			gst_object_unref(data->net_clock);
+			data->net_clock = NULL;
+
+			obs_source_output_video(data->source, NULL);
+			return;
+		}
+	}
+	else {
+		data->net_clock = NULL;
+	}
+
 	GError* err = NULL;
 
 	gchar* pipeline = g_strdup_printf(
@@ -273,6 +294,10 @@ static void start(data_t* data)
 
 		obs_source_output_video(data->source, NULL);
 		return;
+	}
+
+	if (data->net_clock != NULL) {
+		gst_pipeline_use_clock(data->pipe, data->net_clock);
 	}
 
 	GstAppSinkCallbacks video_cbs = {
@@ -351,6 +376,11 @@ static void stop(data_t* data)
 		data->bus_watch_id = 0;
 	}
 
+	if (data->net_clock != NULL) {
+		gst_object_unref(data->net_clock);
+		data->net_clock = NULL;
+	}
+
 	if (data->pipe != NULL)
 	{
 		gst_element_set_state(data->pipe, GST_STATE_NULL);
@@ -377,6 +407,9 @@ static void get_defaults(obs_data_t* settings)
 	obs_data_set_default_bool(settings, "restart_on_eos", true);
 	obs_data_set_default_bool(settings, "restart_on_error", false);
 	obs_data_set_default_bool(settings, "stop_on_hide", true);
+	obs_data_set_default_bool(settings, "external_clock", false);
+	obs_data_set_default_string(settings, "external_clock_ip", "127.0.0.1");
+	obs_data_set_default_int(settings, "external_clock_port", 5637);
 }
 
 static obs_properties_t* get_properties(void* data)
@@ -390,7 +423,9 @@ static obs_properties_t* get_properties(void* data)
 	obs_properties_add_bool(props, "restart_on_eos", "Try to restart when end of stream is reached");
 	obs_properties_add_bool(props, "restart_on_error", "Try to restart after pipeline encountered an error (5 seconds retry throttle)");
 	obs_properties_add_bool(props, "stop_on_hide", "Stop pipeline when hidden");
-
+	obs_properties_add_bool(props, "external_clock", "Use external network clock");
+	obs_properties_add_text(props, "external_clock_ip", "External network clock ip", OBS_TEXT_DEFAULT);
+	obs_properties_add_int(props, "external_clock_port", "External network clock port", 0, 65535, 1);
 	return props;
 }
 
@@ -398,11 +433,12 @@ static void update(void* data, obs_data_t* settings)
 {
 	if (((data_t*)data)->pipe == NULL)
 	{
-		return;
+		start(data);
 	}
-
-	stop(data);
-	start(data);
+	else {
+		stop(data);
+		start(data);
+	}
 }
 
 static void show(void* data)
